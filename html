@@ -8,31 +8,18 @@
 </head>
 <body>
   <div class="game-shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Crystal Hunter • Web Playable Build</p>
-        <h1>Crystal Hunter RPG</h1>
-      </div>
-      <div class="status-pill">Lore + Combat + Shop</div>
-    </header>
-    <section class="story-card" aria-label="Crystal Hunter lore">
-      <h2>Crystal Hunter Lore</h2>
-      <p>You are Crystal Hunter, a rogue traveler crossing fractured realms in pursuit of living crystal energy. Each shard you claim strengthens your path while the veil between worlds begins to tear apart.</p>
-    </section>
     <canvas id="game" width="960" height="600"></canvas>
-    <div class="hint">WASD / Arrows = Move • Left Click = Attack • Space = Fire Light Shot • P = Upgrade Shop • I = Inventory • B = Shop • E = Enter Dungeon • ESC = Pause</div>
+    <div class="hint">WASD / Arrows = Move • Left Click = Attack • Right Click = Skill • Shift = Dash • I = Inventory • B = Shop • E = Enter Dungeon • ESC = Pause</div>
     <section class="vibe-panel" aria-label="Vibe Coding content">
       <h2>AI Studio: Vibe Coding</h2>
       <div class="vibe-grid">
         <article>
           <h3>Natural Language as Code</h3>
           <p>Prompting AI with plain language turns intent into implementation, replacing brittle syntax drills with fast iteration.</p>
-          <img src="https://res.cloudinary.com/[User Content]/image/upload/v1/Crystal-Hunter/vibe-coding.jpg" alt="Vibe coding concept" />
         </article>
         <article>
           <h3>Agile Refinement & Rapid Iteration</h3>
           <p>Each feedback loop sharpens the prompt, improves the output, and shortens the path from concept to playable experience.</p>
-          <img src="https://res.cloudinary.com/[User Content]/image/upload/v1/Crystal-Hunter/hero.jpg" alt="Gameplay loop concept" />
         </article>
         <article>
           <h3>High-Level Orchestration</h3>
@@ -65,10 +52,10 @@
       { name: "Dragon Sword", tier: "Mythic", damage: 30, speed: 1.35, crit: 0.18 }
     ];
     const SKINS = [
-      { id: "default", label: "Default", color: "#22c55e", cost: 0, description: "The traveler’s original mantle, balanced and unadorned." },
-      { id: "emerald", label: "Emerald Green", color: "#34d399", cost: 120, description: "A skin of hope and concealment for patient hunters." },
-      { id: "ruby", label: "Ruby Red", color: "#fb7185", cost: 180, description: "A skin of fury and relentless attack power." },
-      { id: "gold", label: "Royal Gold", color: "#fbbf24", cost: 260, description: "A skin of royalty and fortune for treasure-seekers." }
+      { id: "default", label: "Default", color: "#22c55e", cost: 0 },
+      { id: "emerald", label: "Emerald", color: "#34d399", cost: 120 },
+      { id: "ruby", label: "Ruby", color: "#fb7185", cost: 180 },
+      { id: "gold", label: "Gold", color: "#fbbf24", cost: 260 }
     ];
 
     const keyState = {};
@@ -107,10 +94,6 @@
         critDamage: 1.8,
         defense: 0,
         skin: "default",
-        lastMoveDir: { x: 1, y: 0 },
-        projectileCooldown: 0,
-        projectileDamage: 18,
-        projectileSpeed: 8,
         weapon: { name: "Wood Sword", damage: 12, speed: 0.9, crit: 0.08 },
         armor: { name: "Leather Armor", defense: 0 },
         inventory: { common: 0, rare: 0, epic: 0, legendary: 0, mythic: 0, potion: 0, manaPotion: 0 },
@@ -128,8 +111,6 @@
         enemies: [],
         crystals: [],
         particles: [],
-        projectiles: [],
-        goldDrops: [],
         floatingTexts: [],
         effects: [],
         quests: [],
@@ -302,89 +283,6 @@
       }
     }
 
-    function createProjectile(x, y, dir) {
-      return {
-        x,
-        y,
-        vx: dir.x * (state.player.projectileSpeed + state.player.upgrades.damage * 0.4),
-        vy: dir.y * (state.player.projectileSpeed + state.player.upgrades.damage * 0.4),
-        damage: state.player.projectileDamage + state.player.upgrades.damage * 5,
-        life: 70,
-        size: 6,
-        color: "#f8fafc"
-      };
-    }
-
-    function spawnGoldDrop(x, y, value) {
-      state.goldDrops.push({
-        x,
-        y,
-        vx: randomRange(-0.5, 0.5),
-        vy: randomRange(-1.2, -0.4),
-        life: 420,
-        value,
-        size: 8,
-        pulse: randomRange(0, Math.PI * 2)
-      });
-    }
-
-    function performProjectileShot() {
-      if (state.paused || state.player.projectileCooldown > 0) return;
-      state.player.projectileCooldown = 180;
-      const dir = state.player.lastMoveDir && (Math.abs(state.player.lastMoveDir.x) > 0.01 || Math.abs(state.player.lastMoveDir.y) > 0.01)
-        ? state.player.lastMoveDir
-        : { x: 1, y: 0 };
-      state.projectiles.push(createProjectile(state.player.x + state.player.size / 2, state.player.y + state.player.size / 2, dir));
-      spawnParticles(state.player.x + 10, state.player.y + 10, "#38bdf8", 8);
-      playTone(860, 0.04, "triangle", 0.05);
-      saveState();
-    }
-
-    function updateProjectiles(delta) {
-      for (let i = state.projectiles.length - 1; i >= 0; i--) {
-        const projectile = state.projectiles[i];
-        projectile.x += projectile.vx;
-        projectile.y += projectile.vy;
-        projectile.life -= delta;
-        if (projectile.life <= 0 || projectile.x < -20 || projectile.x > canvas.width + 20 || projectile.y < -20 || projectile.y > canvas.height + 20) {
-          state.projectiles.splice(i, 1);
-          continue;
-        }
-        for (let j = state.enemies.length - 1; j >= 0; j--) {
-          const enemy = state.enemies[j];
-          if (!enemy.alive) continue;
-          const dx = projectile.x - (enemy.x + enemy.size / 2);
-          const dy = projectile.y - (enemy.y + enemy.size / 2);
-          if (Math.hypot(dx, dy) < enemy.size / 2 + 4) {
-            applyDamage(enemy, projectile.damage);
-            spawnParticles(projectile.x, projectile.y, "#f8fafc", 6);
-            state.projectiles.splice(i, 1);
-            break;
-          }
-        }
-      }
-    }
-
-    function updateGoldDrops(delta) {
-      for (let i = state.goldDrops.length - 1; i >= 0; i--) {
-        const drop = state.goldDrops[i];
-        drop.x += drop.vx;
-        drop.y += drop.vy;
-        drop.life -= delta;
-        drop.pulse += 0.08;
-        const dx = state.player.x + state.player.size / 2 - (drop.x + drop.size / 2);
-        const dy = state.player.y + state.player.size / 2 - (drop.y + drop.size / 2);
-        if (Math.hypot(dx, dy) < state.player.size / 2 + drop.size / 2) {
-          state.player.gold += drop.value;
-          addFloatingText(drop.x, drop.y - 4, `+${drop.value}`, "#facc15", 60);
-          spawnParticles(drop.x, drop.y, "#facc15", 8);
-          state.goldDrops.splice(i, 1);
-          continue;
-        }
-        if (drop.life <= 0) state.goldDrops.splice(i, 1);
-      }
-    }
-
     function playTone(frequency, duration, type = "sine", volume = 0.04) {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const now = audioCtx.currentTime;
@@ -501,8 +399,6 @@
       state.player.stats.crystals += 1;
       state.player.gold += 10 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 60 : 0);
       state.player.score += 25 + (enemy.kind === "elite" ? 40 : 0) + (enemy.kind === "boss" ? 140 : 0);
-      const dropValue = Math.round(randomRange(enemy.kind === "boss" ? 16 : 5, enemy.kind === "boss" ? 24 : 15));
-      spawnGoldDrop(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2, dropValue);
       state.player.exp += 18 + (enemy.kind === "elite" ? 24 : 0) + (enemy.kind === "boss" ? 45 : 0);
       state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1.6);
       state.player.mana = Math.min(state.player.maxMana, state.player.mana + 2.6);
@@ -552,7 +448,6 @@
       const len = Math.hypot(moveX, moveY) || 1;
       const inputVector = { x: moveX / len, y: moveY / len };
       if (moveX || moveY) {
-        state.player.lastMoveDir = inputVector;
         const speedFactor = keyState["shift"] && state.player.stamina > 10 ? 1.5 : 1;
         if (keyState["shift"] && state.player.stamina > 10) {
           state.player.stamina = Math.max(0, state.player.stamina - 8);
@@ -564,7 +459,6 @@
       } else {
         state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.45);
       }
-      state.player.projectileCooldown = Math.max(0, state.player.projectileCooldown - delta * 0.001);
       state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
       state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
       state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
@@ -584,9 +478,7 @@
         state.player.dashTimer -= delta;
         if (state.player.dashTimer <= 0) state.player.speed = 4.2;
       }
-      const shootPressed = keyState[" "] || keyState["space"];
-      if (shootPressed && !state.paused) performProjectileShot();
-      if (pointerState.attack && !state.paused) performAttack();
+      if ((keyState[" "] || keyState["space"] || pointerState.attack) && !state.paused) performAttack();
       if (keyState["e"] && !state.paused) enterDungeon();
     }
 
@@ -744,8 +636,6 @@
       updateFloatingTexts(delta);
       updateEffects(delta);
       updateCrystals();
-      updateProjectiles(delta);
-      updateGoldDrops(delta);
       updateEnemies(delta);
       updateWave(delta);
       if (state.mode === "dungeon") updateDungeon(delta);
@@ -766,23 +656,36 @@
     }
 
     function buyUpgrade(id) {
-      const costs = { speed: 100, maxHp: 150, damage: 200 };
-      if (!costs[id] || state.player.gold < costs[id]) return;
+      const costs = { hp: 100, speed: 100, damage: 100, armor: 120, potion: 50, manaPotion: 50, weapon: 140, shield: 160 };
+      if (state.player.gold < costs[id]) return;
       state.player.gold -= costs[id];
-      if (id === "speed") {
-        state.player.speed += 0.5;
-        state.player.upgrades.speed += 1;
-      } else if (id === "maxHp") {
-        state.player.maxHp += 20;
-        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 20);
+      if (id === "hp") {
+        state.player.maxHp += 14;
+        state.player.hp = state.player.maxHp;
         state.player.upgrades.hp += 1;
+      } else if (id === "speed") {
+        state.player.speed += 0.8;
+        state.player.upgrades.speed += 1;
       } else if (id === "damage") {
-        state.player.attackDamage += 5;
+        state.player.attackDamage += 3;
         state.player.weapon.damage = state.player.attackDamage;
-        state.player.projectileDamage += 5;
         state.player.upgrades.damage += 1;
+      } else if (id === "armor") {
+        state.player.armor.defense += 2;
+        state.player.upgrades.armor += 1;
+      } else if (id === "potion") {
+        state.player.inventory.potion += 1;
+      } else if (id === "manaPotion") {
+        state.player.inventory.manaPotion += 1;
+      } else if (id === "weapon") {
+        const weapon = WEAPONS.find((item) => item.name === "Crystal Sword");
+        state.player.weapon = { name: weapon.name, damage: weapon.damage, speed: weapon.speed, crit: weapon.crit };
+        state.player.attackDamage = state.player.weapon.damage;
+        state.player.critChance = Math.max(state.player.critChance, weapon.crit);
+      } else if (id === "shield") {
+        state.player.skills.shield += 1;
+        state.player.armor.defense += 3;
       }
-      addFloatingText(state.player.x, state.player.y - 8, "Upgrade", "#facc15", 60);
       playTone(520, 0.06, "triangle", 0.06);
       saveState();
     }
@@ -801,7 +704,6 @@
 
     function toggleShop() {
       state.showShop = !state.showShop;
-      state.showInventory = false;
       state.paused = false;
       saveState();
     }
@@ -932,25 +834,25 @@
       if (!state.showShop) return;
       ctx.save();
       ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
-      ctx.fillRect(220, 120, 520, 380);
+      ctx.fillRect(220, 140, 520, 360);
       ctx.strokeStyle = "#38bdf8";
-      ctx.strokeRect(220, 120, 520, 380);
+      ctx.strokeRect(220, 140, 520, 320);
       ctx.fillStyle = "#f8fafc";
       ctx.font = "bold 24px Segoe UI";
-      ctx.fillText("Upgrade Shop", 240, 158);
+      ctx.fillText("Shop", 240, 178);
       ctx.font = "16px Segoe UI";
-      ctx.fillText("1) +0.5 Speed • 100 Gold", 240, 200);
-      ctx.fillText("2) +20 Max HP • 150 Gold", 240, 228);
-      ctx.fillText("3) +5 Projectile Damage • 200 Gold", 240, 256);
-      ctx.fillText("4) Emerald Green • 120 Gold", 240, 292);
-      ctx.fillText("5) Ruby Red • 180 Gold", 240, 320);
-      ctx.fillText("6) Royal Gold • 260 Gold", 240, 348);
-      ctx.fillText("P = Close • 1/2/3 buy upgrades", 240, 384);
-      ctx.font = "14px Segoe UI";
-      ctx.fillStyle = "#cbd5e1";
-      ctx.fillText("Emerald Green: Hope and concealment.", 240, 410);
-      ctx.fillText("Ruby Red: Fury and relentless attack power.", 240, 432);
-      ctx.fillText("Royal Gold: Royal fortune and treasure luck.", 240, 454);
+      ctx.fillText("1) HP Boost • 100 Gold", 240, 220);
+      ctx.fillText("2) Speed Boost • 100 Gold", 240, 248);
+      ctx.fillText("3) Damage Boost • 100 Gold", 240, 276);
+      ctx.fillText("4) Armor Boost • 120 Gold", 240, 304);
+      ctx.fillText("5) Potion • 50 Gold", 240, 332);
+      ctx.fillText("6) Mana Potion • 50 Gold", 240, 360);
+      ctx.fillText("7) Crystal Sword • 140 Gold", 240, 388);
+      ctx.fillText("8) Default Skin • Free", 240, 416);
+      ctx.fillText("9) Emerald Skin • 120 Gold", 240, 444);
+      ctx.fillText("0) Ruby Skin • 180 Gold", 240, 472);
+      ctx.fillText("- / =) Gold Skin • 260 Gold", 240, 500);
+      ctx.fillText("Press B to close", 240, 528);
       ctx.restore();
     }
 
@@ -1020,25 +922,6 @@
         ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
         ctx.restore();
       });
-      state.projectiles.forEach((projectile) => {
-        ctx.save();
-        ctx.translate(projectile.x, projectile.y);
-        ctx.fillStyle = projectile.color;
-        ctx.beginPath();
-        ctx.arc(0, 0, projectile.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-      state.goldDrops.forEach((drop) => {
-        ctx.save();
-        ctx.translate(drop.x + drop.size / 2, drop.y + drop.size / 2);
-        ctx.scale(1 + Math.sin(drop.pulse) * 0.08, 1 + Math.sin(drop.pulse) * 0.08);
-        ctx.fillStyle = "#facc15";
-        ctx.beginPath();
-        ctx.arc(0, 0, drop.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
       ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       const skin = SKINS.find((entry) => entry.id === state.player.skin) || SKINS[0];
@@ -1085,17 +968,24 @@
       keyState[key] = true;
       if ([" ", "space"].includes(key)) event.preventDefault();
       if (key === "escape") { event.preventDefault(); togglePause(); }
-      if (key === "p" || key === "b") toggleShop();
+      if (key === "b") toggleShop();
       if (key === "i") toggleInventory();
       if (key === "r" && state.paused) state.paused = false;
       if (key === "s" && state.paused) saveState();
       if (key === "t" && state.paused) resetRun();
-      if (key === "1" && state.showShop) buyUpgrade("speed");
-      if (key === "2" && state.showShop) buyUpgrade("maxHp");
-      if (key === "3" && state.showShop) buyUpgrade("damage");
-      if (key === "4" && state.showShop) buySkin("emerald");
-      if (key === "5" && state.showShop) buySkin("ruby");
-      if (key === "6" && state.showShop) buySkin("gold");
+      if (key === "1") buyUpgrade("hp");
+      if (key === "2") buyUpgrade("speed");
+      if (key === "3") buyUpgrade("damage");
+      if (key === "4") buyUpgrade("armor");
+      if (key === "5") buyUpgrade("potion");
+      if (key === "6") buyUpgrade("manaPotion");
+      if (key === "7") buyUpgrade("weapon");
+      if (key === "8") buySkin("default");
+      if (key === "9") buySkin("emerald");
+      if (key === "0") buySkin("ruby");
+      if (key === "-" || key === "=") buySkin("gold");
+      if (key === "1" && state.showInventory) usePotion("potion");
+      if (key === "2" && state.showInventory) usePotion("manaPotion");
       if (key === "e") enterDungeon();
       if (key === "q") performSkill();
     });

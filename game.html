@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter — Combat Test</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family:Segoe UI, sans-serif; background:#020617; color:#f8fafc; display:grid; place-items:center; min-height:100vh; }
+    .wrap { width:min(100%, 1100px); padding:16px; }
+    .story { margin-bottom:10px; padding:12px 14px; border-radius:12px; background:rgba(15,23,42,0.9); border:1px solid rgba(52,211,153,0.24); }
+    canvas { width:100%; height:auto; border:2px solid #38bdf8; background:#07111f; border-radius:12px; }
+    .controls { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    button { border:0; border-radius:8px; padding:8px 12px; background:#38bdf8; color:white; cursor:pointer; }
+    .hint { text-align:center; margin-top:8px; color:#cbd5e1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="story">
+      <strong>Crystal Hunter</strong>
+      <p>You are a wandering hunter crossing fractured realms to hunt crystal energy. Use light shots and upgrades to survive the wave.</p>
+    </div>
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="controls">
+      <button onclick="location.reload()">Reload</button>
+      <button onclick="alert('Move: WASD / Arrow Keys\nShoot: Space\nShop: P\nUpgrade: 1/2/3')">Help</button>
+    </div>
+    <div class="hint">เกมนี้ถูกเตรียมให้เล่นได้ทันทีในเว็บเบราว์เซอร์</div>
+  </div>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const state = { player:{x:120,y:120,size:24,hp:100,maxHp:100,gold:0,score:0,attackDamage:12,speed:4.5,projectileDamage:18,projectileSpeed:8,projectileCooldown:0,lastMove:{x:1,y:0}}, enemies:[], crystals:[], particles:[], projectiles:[], goldDrops:[], floatingTexts:[], wave:1, paused:false, shop:false };
+    const keys = {};
+    function rand(min,max){return Math.random()*(max-min)+min;}
+    function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+    function addText(x,y,text,color){ state.floatingTexts.push({x,y,text,color,life:70,vy:-0.8}); }
+    function createCrystal(){ return {x:rand(40,canvas.width-40), y:rand(60,canvas.height-40), size:16, pulse:rand(0,Math.PI*2), color:'#38bdf8'}; }
+    function createEnemy(){ return {x:rand(80,canvas.width-80), y:rand(90,canvas.height-80), size:24, hp:30, maxHp:30, speed:1.3, alive:true}; }
+    function spawnWave(){ state.enemies=[]; for(let i=0;i<4+state.wave;i++) state.enemies.push(createEnemy()); }
+    function spawnParticles(x,y,color,count=10){ for(let i=0;i<count;i++) state.particles.push({x,y,vx:rand(-2.8,2.8),vy:rand(-2.8,2.8),life:32,color}); }
+    function createProjectile(x,y,dir){ return {x,y,vx:dir.x*(state.player.projectileSpeed),vy:dir.y*(state.player.projectileSpeed),damage:state.player.projectileDamage,life:80,size:6,color:'#f8fafc'}; }
+    function spawnGoldDrop(x,y,value){ state.goldDrops.push({x,y,vx:rand(-0.5,0.5),vy:rand(-1.2,-0.4),life:420,value,size:8,pulse:rand(0,Math.PI*2)}); }
+    function applyDamage(enemy, amount){ enemy.hp -= amount; if(enemy.hp <= 0){ state.player.gold += 10; state.player.score += 20; addText(enemy.x,enemy.y,'+10','#34d399'); spawnGoldDrop(enemy.x,enemy.y,rand(5,15)); spawnParticles(enemy.x,enemy.y,'#22c55e',18); state.enemies.splice(state.enemies.indexOf(enemy),1); } }
+    function update(dt){ if(state.paused || state.shop) return; const moveX=(keys['ArrowRight']||keys['d']?1:0)-(keys['ArrowLeft']||keys['a']?1:0); const moveY=(keys['ArrowDown']||keys['s']?1:0)-(keys['ArrowUp']||keys['w']?1:0); const len=Math.hypot(moveX,moveY)||1; if(moveX||moveY){ state.player.lastMove={x:moveX/len,y:moveY/len}; state.player.x += (moveX/len)*state.player.speed; state.player.y += (moveY/len)*state.player.speed; }
+      state.player.x=clamp(state.player.x,0,canvas.width-state.player.size); state.player.y=clamp(state.player.y,0,canvas.height-state.player.size); state.player.projectileCooldown=Math.max(0,state.player.projectileCooldown-dt*0.001);
+      state.enemies.forEach(e=>{ const dx=state.player.x+state.player.size/2-(e.x+e.size/2); const dy=state.player.y+state.player.size/2-(e.y+e.size/2); const dist=Math.hypot(dx,dy)||1; e.x += (dx/dist)*e.speed; e.y += (dy/dist)*e.speed; if(Math.hypot(state.player.x-e.x,state.player.y-e.y)<24){ state.player.hp-=1; if(state.player.hp<=0){state.player.hp=100; state.player.gold=0; state.player.score=0;}}});
+      for(let i=state.crystals.length-1;i>=0;i--){ const c=state.crystals[i]; const dx=state.player.x+state.player.size/2-(c.x+c.size/2); const dy=state.player.y+state.player.size/2-(c.y+c.size/2); if(Math.hypot(dx,dy)<18){ state.player.gold+=10; state.player.score+=10; addText(c.x,c.y,'+10','#facc15'); state.crystals.splice(i,1); state.crystals.push(createCrystal()); }}
+      for(let i=state.projectiles.length-1;i>=0;i--){ const p=state.projectiles[i]; p.x+=p.vx; p.y+=p.vy; p.life-=dt; if(p.life<=0){ state.projectiles.splice(i,1); continue; } for(let j=state.enemies.length-1;j>=0;j--){ const e=state.enemies[j]; const dx=p.x-(e.x+e.size/2); const dy=p.y-(e.y+e.size/2); if(Math.hypot(dx,dy)<e.size/2+4){ applyDamage(e,p.damage); spawnParticles(p.x,p.y,'#f8fafc',6); state.projectiles.splice(i,1); break; } } }
+      for(let i=state.goldDrops.length-1;i>=0;i--){ const drop=state.goldDrops[i]; drop.x+=drop.vx; drop.y+=drop.vy; drop.life-=dt; drop.pulse+=0.08; const dx=state.player.x+state.player.size/2-(drop.x+drop.size/2); const dy=state.player.y+state.player.size/2-(drop.y+drop.size/2); if(Math.hypot(dx,dy)<state.player.size/2+drop.size/2){ state.player.gold+=drop.value; addText(drop.x,drop.y,`+${drop.value}`,'#facc15'); state.goldDrops.splice(i,1); continue; } if(drop.life<=0) state.goldDrops.splice(i,1); }
+      for(let i=state.floatingTexts.length-1;i>=0;i--){ const t=state.floatingTexts[i]; t.y += t.vy*dt*0.06; t.life-=dt; if(t.life<=0) state.floatingTexts.splice(i,1); }
+      for(let i=state.particles.length-1;i>=0;i--){ const p=state.particles[i]; p.x+=p.vx; p.y+=p.vy; p.life-=dt*0.06; if(p.life<=0) state.particles.splice(i,1); }
+      if((keys[' ']||keys['Space']) && state.player.projectileCooldown<=0){ state.player.projectileCooldown=0.2; state.projectiles.push(createProjectile(state.player.x+state.player.size/2,state.player.y+state.player.size/2,state.player.lastMove)); }
+      if(state.enemies.length===0){ state.wave+=1; spawnWave(); }
+    }
+    function buyUpgrade(id){ if(id==='speed' && state.player.gold>=100){ state.player.gold-=100; state.player.speed+=0.5; } if(id==='hp'&&state.player.gold>=150){ state.player.gold-=150; state.player.maxHp+=20; state.player.hp=Math.min(state.player.maxHp,state.player.hp+20); } if(id==='damage'&&state.player.gold>=200){ state.player.gold-=200; state.player.attackDamage+=5; state.player.projectileDamage+=5; } }
+    function draw(){ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#030712'; ctx.fillRect(0,0,canvas.width,canvas.height); state.crystals.forEach(c=>{ctx.save(); ctx.translate(c.x+c.size/2,c.y+c.size/2); ctx.scale(1+Math.sin(c.pulse)*0.05,1+Math.sin(c.pulse)*0.05); ctx.fillStyle=c.color; ctx.fillRect(-c.size/2,-c.size/2,c.size,c.size); ctx.restore(); c.pulse+=0.08;}); state.enemies.forEach(e=>{ ctx.fillStyle='#ef4444'; ctx.fillRect(e.x,e.y,e.size,e.size); }); state.projectiles.forEach(p=>{ ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill();}); state.goldDrops.forEach(drop=>{ctx.save(); ctx.translate(drop.x+drop.size/2,drop.y+drop.size/2); ctx.scale(1+Math.sin(drop.pulse)*0.08,1+Math.sin(drop.pulse)*0.08); ctx.fillStyle='#facc15'; ctx.beginPath(); ctx.arc(0,0,drop.size,0,Math.PI*2); ctx.fill(); ctx.restore();}); ctx.fillStyle='#22c55e'; ctx.fillRect(state.player.x,state.player.y,state.player.size,state.player.size); state.particles.forEach(p=>{ ctx.globalAlpha=Math.max(0,p.life/32); ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,3,3);}); ctx.globalAlpha=1; ctx.fillStyle='#f8fafc'; ctx.font='16px Segoe UI'; ctx.fillText(`HP ${state.player.hp}`, 16, 24); ctx.fillText(`Gold ${state.player.gold}`, 16, 46); ctx.fillText(`Wave ${state.wave}`, 16, 68); state.floatingTexts.forEach(t=>{ ctx.fillStyle=t.color; ctx.font='bold 14px Segoe UI'; ctx.fillText(t.text,t.x,t.y); }); if(state.shop){ ctx.fillStyle='rgba(2,6,23,0.92)'; ctx.fillRect(220,140,520,260); ctx.strokeStyle='#38bdf8'; ctx.strokeRect(220,140,520,260); ctx.fillStyle='#f8fafc'; ctx.font='bold 20px Segoe UI'; ctx.fillText('Upgrade Shop',240,178); ctx.font='16px Segoe UI'; ctx.fillText('1) +0.5 Speed • 100 Gold',240,214); ctx.fillText('2) +20 Max HP • 150 Gold',240,242); ctx.fillText('3) +5 Damage • 200 Gold',240,270); ctx.fillText('P = Close',240,298); }}
+    function loop(ts){ const dt=Math.min(32,ts-(loop.last||ts)); loop.last=ts; update(dt); draw(); requestAnimationFrame(loop); }
+    document.addEventListener('keydown', e=>{ const key=e.key.toLowerCase(); keys[key]=true; if(key==='escape') state.paused=!state.paused; if(key==='p') state.shop=!state.shop; if(key==='1'&&state.shop) buyUpgrade('speed'); if(key==='2'&&state.shop) buyUpgrade('hp'); if(key==='3'&&state.shop) buyUpgrade('damage'); });
+    document.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+    for(let i=0;i<6;i++) state.crystals.push(createCrystal()); spawnWave(); requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
