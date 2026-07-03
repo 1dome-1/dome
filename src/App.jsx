@@ -1,67 +1,32 @@
 import React, { useState } from 'react'
-import MainMenu from './ui/MainMenu'
-import CharacterSelect from './ui/CharacterSelect'
-import Game from './Game'
-import OptionsMenu from './ui/OptionsMenu'
+import { Canvas } from '@react-three/fiber'
+import { Html, OrbitControls } from '@react-three/drei'
+import GameScene from './GameScene'
 
-function App() {
-  const [gameState, setGameState] = useState('menu') // 'menu' | 'options' | 'character-select' | 'game'
-  const [selectedCharacter, setSelectedCharacter] = useState(null)
-  const [gameSettings, setGameSettings] = useState({
-    keyBindings: {
-      moveUp: 'w',
-      moveDown: 's',
-      moveLeft: 'a',
-      moveRight: 'd',
-      attack: 'p',
-      dance: 'o',
-      pause: 'Escape',
-    },
-    volume: 0.7,
-    difficulty: 'normal',
-  })
-
-  const handlePlayGame = () => {
-    setGameState('character-select')
-  }
-
-  const handleCharacterSelect = (character) => {
-    setSelectedCharacter(character)
-    setGameState('game')
-  }
-
-  const handleOptions = () => {
-    setGameState('options')
-  }
-
-  const handleBackFromOptions = (newSettings) => {
-    if (newSettings) {
-      setGameSettings(newSettings)
-    }
-    setGameState('menu')
-  }
-
-  const handleBackToMenu = () => {
-    setGameState('menu')
-    setSelectedCharacter(null)
-  }
-
+export default function App(){
+  const [started, setStarted] = useState(false)
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden">
-      {gameState === 'menu' && (
-        <MainMenu onPlay={handlePlayGame} onOptions={handleOptions} />
+    <div className="app-root">
+      {!started && (
+        <div className="title-screen">
+          <img src="https://res.cloudinary.com/dsucg33fv/image/upload/v1782709347/logo_i8827v.png" alt="logo" className="logo" />
+          <h1>Crystal Hunter (R3F MVP)</h1>
+          <div className="buttons">
+            <button onClick={()=>setStarted(true)}>Start Game</button>
+            <button onClick={() => window.location.reload()}>Reload</button>
+          </div>
+          <p className="hint">Controls: WASD / Arrow keys — P = Attack, O = Skill</p>
+        </div>
       )}
-      {gameState === 'options' && (
-        <OptionsMenu initialSettings={gameSettings} onBack={handleBackFromOptions} />
-      )}
-      {gameState === 'character-select' && (
-        <CharacterSelect onSelect={handleCharacterSelect} onBack={handleBackToMenu} />
-      )}
-      {gameState === 'game' && selectedCharacter && (
-        <Game character={selectedCharacter} settings={gameSettings} onGameEnd={handleBackToMenu} />
+
+      {started && (
+        <Canvas camera={{ position: [0, 20, 40], fov: 50 }}>
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[10, 20, 10]} intensity={0.8} />
+          <GameScene />
+          <OrbitControls enablePan={false} enableZoom={false} />
+        </Canvas>
       )}
     </div>
   )
 }
-
-export default App
