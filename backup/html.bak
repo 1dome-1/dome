@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #020617, #111827 45%, #0f172a);
+      color: #f8fafc;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      width: min(100%, 1100px);
+    }
+    canvas {
+      width: 100%;
+      max-width: 960px;
+      height: auto;
+      border: 3px solid #38bdf8;
+      background: #020617;
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.2);
+      touch-action: none;
+      border-radius: 10px;
+    }
+    .hint {
+      font-size: 14px;
+      color: #cbd5e1;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .controls button {
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      background: rgba(56, 189, 248, 0.18);
+      color: white;
+      cursor: pointer;
+    }
+    .controls button:active { transform: scale(0.98); }
+    @media (max-width: 768px) {
+      body { overflow: auto; }
+      canvas { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="controls">
+      <button data-action="up">↑</button>
+      <button data-action="left">←</button>
+      <button data-action="down">↓</button>
+      <button data-action="right">→</button>
+      <button data-action="attack">Attack</button>
+      <button data-action="shop">Shop</button>
+      <button data-action="inventory">Inventory</button>
+    </div>
+    <div class="hint">WASD / Arrow Keys = Move • Space = Attack • ESC = Pause • B = Shop • I = Inventory • D = Dungeon</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const saveKey = "crystal-hunter-save-v1";
+    const rarityData = [
+      { name: "common", color: "#38bdf8", value: 10, label: "Common" },
+      { name: "rare", color: "#4ade80", value: 25, label: "Rare" },
+      { name: "epic", color: "#a855f7", value: 50, label: "Epic" },
+      { name: "legendary", color: "#facc15", value: 100, label: "Legendary" }
+    ];
+
+    const keyState = {};
+    const pointerState = { up: false, down: false, left: false, right: false, attack: false };
+    let lastTime = 0;
+    let audioCtx = null;
+    let musicGain = null;
+    let musicOsc = null;
+
+    function createDefaultPlayer() {
+      return {
+        x: 120,
+        y: 120,
+        size: 28,
+        speed: 4.8,
+        hp: 100,
+        maxHp: 100,
+        armor: 0,
+        level: 1,
+        exp: 0,
+        expToNext: 100,
+        score: 0,
+        gold: 0,
+        attackDamage: 12,
+        attackCooldown: 0,
+        critChance: 0.12,
+        critDamage: 2.0,
+        attackRange: 72,
+        invincible: 0,
+        displayHp: 1,
+        displayExp: 0,
+        weapon: { name: "Iron Sword", damage: 12 },
+        armorEquip: { name: "Leather Armor", defense: 0 },
+        inventory: { common: 0, rare: 0, epic: 0, legendary: 0 },
+        upgrades: { hp: 0, speed: 0, damage: 0, armor: 0 },
+        skills: { dash: 0, shield: 0, blast: 0 },
+        stats: { crystals: 0, enemiesKilled: 0, damageDealt: 0, wavesCleared: 0, bossDefeats: 0, dungeonFloors: 0 },
+        achievements: { firstCrystal: false, firstWave: false, bossDefeated: false, dungeonClear: false }
+      };
+    }
+
+    function createDefaultGame() {
+      return {
+        player: createDefaultPlayer(),
+        enemies: [],
+        crystals: [],
+        particles: [],
+        floatingTexts: [],
+        effects: [],
+        paused: false,
+        showShop: false,
+        showInventory: false,
+        screenShake: 0,
+        hitFlash: 0,
+        wave: 1,
+        waveTimer: 0,
+        waveActive: false,
+        waveCooldown: 4,
+        endless: true,
+        bossPending: false,
+        mode: "arena",
+        dungeon: null,
+        lastSavedAt: 0,
+        highScore: Number(localStorage.getItem("highscore") || 0)
+      };
+    }
+
+    const state = loadGame();
+
+    function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+    function saveGame() {
+      const data = {
+        player: state.player,
+        wave: state.wave,
+        highScore: state.highScore,
+        mode: state.mode,
+        dungeon: state.dungeon,
+        stats: state.player.stats,
+        achievements: state.player.achievements,
+        showShop: state.showShop,
+        showInventory: state.showInventory,
+        waveActive: state.waveActive
+      };
+      localStorage.setItem(saveKey, JSON.stringify(data));
+      localStorage.setItem("highscore", String(state.highScore));
+      state.lastSavedAt = Date.now();
+    }
+
+    function loadGame() {
+      try {
+        const raw = localStorage.getItem(saveKey);
+        if (!raw) return createDefaultGame();
+        const parsed = JSON.parse(raw);
+        const game = createDefaultGame();
+        if (parsed.player) {
+          game.player = { ...game.player, ...parsed.player };
+          game.player.inventory = { ...game.player.inventory, ...(parsed.player.inventory || {}) };
+          game.player.upgrades = { ...game.player.upgrades, ...(parsed.player.upgrades || {}) };
+          game.player.skills = { ...game.player.skills, ...(parsed.player.skills || {}) };
+          game.player.stats = { ...game.player.stats, ...(parsed.player.stats || {}) };
+          game.player.achievements = { ...game.player.achievements, ...(parsed.player.achievements || {}) };
+          game.player.weapon = { ...game.player.weapon, ...(parsed.player.weapon || {}) };
+          game.player.armorEquip = { ...game.player.armorEquip, ...(parsed.player.armorEquip || {}) };
+          game.player.attackDamage = game.player.weapon.damage;
+        }
+        game.wave = parsed.wave || 1;
+        game.highScore = Number(parsed.highScore || localStorage.getItem("highscore") || 0);
+        game.mode = parsed.mode || "arena";
+        game.dungeon = parsed.dungeon || null;
+        game.showShop = Boolean(parsed.showShop);
+        game.showInventory = Boolean(parsed.showInventory);
+        game.waveActive = Boolean(parsed.waveActive);
+        return game;
+      } catch (error) {
+        console.warn("Save load failed", error);
+        return createDefaultGame();
+      }
+    }
+
+    function resetGame() {
+      const fresh = createDefaultGame();
+      fresh.highScore = state.highScore;
+      Object.assign(state, fresh);
+      state.highScore = fresh.highScore;
+      state.player.score = 0;
+      state.player.gold = 0;
+      state.player.attackDamage = state.player.weapon.damage;
+      saveGame();
+      spawnWave();
+    }
+
+    function initWorld() {
+      state.crystals.push(createCrystal());
+      spawnWave();
+      saveGame();
+    }
+
+    function createCrystal() {
+      const roll = Math.random();
+      let rarity;
+      if (roll < 0.58) rarity = rarityData[0];
+      else if (roll < 0.84) rarity = rarityData[1];
+      else if (roll < 0.96) rarity = rarityData[2];
+      else rarity = rarityData[3];
+      return {
+        x: randomRange(40, canvas.width - 40),
+        y: randomRange(60, canvas.height - 40),
+        size: 18,
+        rarity,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function createEnemy(kind = "normal") {
+      const maxHp = kind === "elite" ? 70 + state.wave * 8 : kind === "boss" ? 220 + state.wave * 20 : 36 + state.wave * 5;
+      const speed = kind === "elite" ? 2.8 + state.wave * 0.03 : kind === "boss" ? 1.6 : 1.6 + state.wave * 0.03;
+      const damage = kind === "elite" ? 8 + Math.floor(state.wave / 2) : kind === "boss" ? 14 + state.wave : 6 + Math.floor(state.wave / 2);
+      return {
+        x: randomRange(80, canvas.width - 80),
+        y: randomRange(90, canvas.height - 80),
+        size: kind === "boss" ? 44 : kind === "elite" ? 34 : 28,
+        speed,
+        hp: maxHp,
+        maxHp,
+        damage,
+        cooldown: 900,
+        lastHit: 0,
+        kind,
+        alive: true,
+        flash: 0
+      };
+    }
+
+    function spawnWave() {
+      state.enemies = [];
+      const count = 4 + state.wave * 2 + (state.wave % 5 === 0 ? 2 : 0);
+      const bossWave = state.wave % 5 === 0;
+      for (let i = 0; i < count; i++) {
+        const kind = bossWave && i === 0 ? "boss" : i % 6 === 0 ? "elite" : "normal";
+        state.enemies.push(createEnemy(kind));
+      }
+      state.waveActive = true;
+      state.waveTimer = 0;
+      addFloatingText(canvas.width / 2 - 80, 90, `Wave ${state.wave}`, "#fbbf24", 120);
+      playTone(660, 0.08, "triangle", 0.08);
+    }
+
+    function updateWave(delta) {
+      if (!state.waveActive) {
+        state.waveTimer += delta;
+        if (state.waveTimer >= state.waveCooldown) {
+          state.wave++;
+          state.player.stats.wavesCleared += 1;
+          state.player.achievements.firstWave = true;
+          spawnWave();
+        }
+        return;
+      }
+      if (state.enemies.length === 0) {
+        state.waveActive = false;
+        state.waveTimer = 0;
+        state.player.stats.wavesCleared += 1;
+        state.player.gold += 40 + state.wave * 8;
+        state.player.score += 100 + state.wave * 10;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+        addFloatingText(120, 80, `Wave Clear +${40 + state.wave * 8} Gold`, "#34d399", 90);
+        playTone(880, 0.12, "square", 0.08);
+        if (state.wave % 5 === 0) {
+          state.player.achievements.bossDefeated = true;
+          state.player.stats.bossDefeats += 1;
+        }
+        saveGame();
+      }
+    }
+
+    function addFloatingText(x, y, text, color, life = 80) {
+      state.floatingTexts.push({ x, y, text, color, life, vy: -0.8 });
+    }
+
+    function spawnParticles(x, y, color, count = 16) {
+      for (let i = 0; i < count; i++) {
+        state.particles.push({
+          x,
+          y,
+          vx: randomRange(-2.2, 2.2),
+          vy: randomRange(-2.2, 2.2),
+          life: 34,
+          color
+        });
+      }
+    }
+
+    function updateParticles(delta) {
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= delta * 60;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+        const t = state.floatingTexts[i];
+        t.y += t.vy * delta * 0.06;
+        t.life -= delta;
+        if (t.life <= 0) state.floatingTexts.splice(i, 1);
+      }
+    }
+
+    function updateEffects(delta) {
+      state.effects = state.effects.filter((effect) => {
+        effect.life -= delta * 60;
+        return effect.life > 0;
+      });
+    }
+
+    function handleInput(delta) {
+      const moveX = (keyState["arrowright"] || keyState["d"] || pointerState.right ? 1 : 0) - (keyState["arrowleft"] || keyState["a"] || pointerState.left ? 1 : 0);
+      const moveY = (keyState["arrowdown"] || keyState["s"] || pointerState.down ? 1 : 0) - (keyState["arrowup"] || keyState["w"] || pointerState.up ? 1 : 0);
+      const len = Math.hypot(moveX, moveY) || 1;
+      if (moveX || moveY) {
+        const nx = (moveX / len) * state.player.speed;
+        const ny = (moveY / len) * state.player.speed;
+        state.player.x += nx;
+        state.player.y += ny;
+      }
+      state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
+      state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
+      state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
+      state.player.invincible = Math.max(0, state.player.invincible - delta * 0.001);
+      state.hitFlash = Math.max(0, state.hitFlash - delta * 0.001);
+      state.screenShake = Math.max(0, state.screenShake - delta * 0.001);
+      if ((keyState[" "] || keyState["space"] || pointerState.attack) && state.player.attackCooldown <= 0 && !state.paused) {
+        performAttack();
+      }
+    }
+
+    function performAttack() {
+      if (state.paused) return;
+      state.player.attackCooldown = 260;
+      const attackRadius = state.player.attackRange;
+      let damage = state.player.attackDamage;
+      const crit = Math.random() < state.player.critChance;
+      if (crit) damage *= state.player.critDamage;
+      if (state.player.skills.blast > 0) damage += state.player.skills.blast * 4;
+      state.player.stats.damageDealt += damage;
+      state.effects.push({ x: state.player.x + 10, y: state.player.y + 10, life: 12, color: crit ? "#fde68a" : "#f8fafc" });
+      spawnParticles(state.player.x + 10, state.player.y + 10, crit ? "#fbbf24" : "#f8fafc");
+      playTone(crit ? 1200 : 900, 0.05, "square", 0.06);
+      state.enemies.forEach((enemy) => {
+        const dx = (state.player.x + state.player.size / 2) - (enemy.x + enemy.size / 2);
+        const dy = (state.player.y + state.player.size / 2) - (enemy.y + enemy.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < attackRadius + enemy.size / 2) {
+          enemy.hp -= damage;
+          enemy.flash = 0.18;
+          addFloatingText(enemy.x + 6, enemy.y - 4, `${Math.round(damage)}${crit ? "!" : ""}`, crit ? "#fbbf24" : "#fda4af", 65);
+          if (enemy.hp <= 0) {
+            killEnemy(enemy);
+          }
+        }
+      });
+      state.hitFlash = 0.12;
+      state.screenShake = 0.18;
+      saveGame();
+    }
+
+    function killEnemy(enemy) {
+      enemy.alive = false;
+      state.player.stats.enemiesKilled += 1;
+      state.player.stats.crystals += 1;
+      state.player.gold += 10 + (enemy.kind === "elite" ? 16 : 0) + (enemy.kind === "boss" ? 40 : 0);
+      state.player.score += 25 + (enemy.kind === "elite" ? 35 : 0) + (enemy.kind === "boss" ? 80 : 0);
+      state.player.exp += 18 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 35 : 0);
+      state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1.2);
+      addFloatingText(enemy.x, enemy.y - 8, "+Gold", "#34d399", 70);
+      spawnParticles(enemy.x, enemy.y, enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#22c55e", enemy.kind === "boss" ? 50 : 25);
+      state.effects.push({ x: enemy.x, y: enemy.y, life: 20, color: "#fde68a" });
+      playTone(440, 0.06, "sawtooth", 0.05);
+      if (state.player.exp >= state.player.expToNext) {
+        levelUp();
+      }
+    }
+
+    function levelUp() {
+      state.player.level += 1;
+      state.player.exp = 0;
+      state.player.expToNext = Math.round(state.player.expToNext * 1.18);
+      state.player.maxHp += 12;
+      state.player.hp = state.player.maxHp;
+      state.player.attackDamage += 2;
+      state.player.weapon.damage = state.player.attackDamage;
+      state.player.upgrades.hp += 1;
+      addFloatingText(120, 120, `Level ${state.player.level}`, "#fbbf24", 100);
+      playTone(740, 0.12, "triangle", 0.08);
+      saveGame();
+    }
+
+    function updateEnemies(delta) {
+      const playerCenterX = state.player.x + state.player.size / 2;
+      const playerCenterY = state.player.y + state.player.size / 2;
+      for (let i = state.enemies.length - 1; i >= 0; i--) {
+        const enemy = state.enemies[i];
+        if (!enemy.alive) {
+          state.enemies.splice(i, 1);
+          continue;
+        }
+        enemy.flash = Math.max(0, enemy.flash - delta * 0.001);
+        const ex = playerCenterX - (enemy.x + enemy.size / 2);
+        const ey = playerCenterY - (enemy.y + enemy.size / 2);
+        const dist = Math.hypot(ex, ey);
+        if (dist > 0.001) {
+          const nx = (ex / dist) * enemy.speed;
+          const ny = (ey / dist) * enemy.speed;
+          enemy.x += nx;
+          enemy.y += ny;
+        }
+        const hitDist = Math.hypot(state.player.x - enemy.x, state.player.y - enemy.y);
+        if (hitDist < state.player.size / 2 + enemy.size / 2 && performance.now() - enemy.lastHit >= enemy.cooldown) {
+          const damage = Math.max(4, enemy.damage - state.player.armorEquip.defense - state.player.upgrades.armor * 1.2);
+          state.player.hp -= damage;
+          state.player.invincible = 180;
+          enemy.lastHit = performance.now();
+          addFloatingText(state.player.x + 6, state.player.y - 6, `-${Math.round(damage)}`, "#f87171", 55);
+          playTone(220, 0.04, "sine", 0.05);
+          state.hitFlash = 0.2;
+          state.screenShake = 0.16;
+          if (state.player.hp <= 0) {
+            gameOver();
+            return;
+          }
+        }
+      }
+    }
+
+    function updateCrystals() {
+      for (let i = state.crystals.length - 1; i >= 0; i--) {
+        const crystal = state.crystals[i];
+        crystal.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (crystal.x + crystal.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (crystal.y + crystal.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + crystal.size / 2) {
+          const reward = crystal.rarity.value;
+          state.player.gold += reward;
+          state.player.score += reward;
+          state.player.inventory[crystal.rarity.name] += 1;
+          state.player.stats.crystals += 1;
+          state.player.achievements.firstCrystal = true;
+          addFloatingText(crystal.x, crystal.y - 6, `+${reward} Gold`, crystal.rarity.color, 70);
+          spawnParticles(crystal.x, crystal.y, crystal.rarity.color);
+          playTone(580, 0.06, "triangle", 0.05);
+          state.crystals.splice(i, 1);
+          state.crystals.push(createCrystal());
+          saveGame();
+        }
+      }
+    }
+
+    function update(delta) {
+      if (state.paused || state.showShop || state.showInventory) return;
+      handleInput(delta);
+      updateParticles(delta);
+      updateFloatingTexts(delta);
+      updateEffects(delta);
+      updateCrystals();
+      updateEnemies(delta);
+      updateWave(delta);
+      if (state.mode === "dungeon") updateDungeon(delta);
+      if (state.player.hp <= 0) gameOver();
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, "#020617");
+      gradient.addColorStop(1, "#0f172a");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      for (let i = 0; i < 30; i++) {
+        const x = (i * 37) % canvas.width;
+        const y = (i * 53) % canvas.height;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+
+    function drawHud() {
+      state.player.displayHp += (state.player.hp / state.player.maxHp - state.player.displayHp) * 0.12;
+      state.player.displayExp += (state.player.exp / state.player.expToNext - state.player.displayExp) * 0.12;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.8)";
+      ctx.fillRect(12, 12, 420, 140);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(12, 12, 420, 140);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText(`HP ${Math.floor(state.player.hp)} / ${Math.floor(state.player.maxHp)}`, 24, 40);
+      ctx.fillText(`Level ${state.player.level}`, 24, 64);
+      ctx.fillText(`EXP ${state.player.exp} / ${state.player.expToNext}`, 24, 88);
+      ctx.fillText(`Gold ${state.player.gold}`, 24, 112);
+      ctx.fillText(`Score ${state.player.score}`, 24, 136);
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(160, 34, 220, 12);
+      ctx.fillStyle = state.player.displayHp > 0.35 ? "#22c55e" : "#ef4444";
+      ctx.fillRect(160, 34, 220 * state.player.displayHp, 12);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillRect(160, 54, 220 * state.player.displayExp, 8);
+      ctx.restore();
+    }
+
+    function drawInventoryPanel() {
+      if (!state.showInventory) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.85)";
+      ctx.fillRect(720, 12, 220, 190);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(720, 12, 220, 190);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText("Inventory", 736, 36);
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Common ${state.player.inventory.common}`, 736, 62);
+      ctx.fillText(`Rare ${state.player.inventory.rare}`, 736, 84);
+      ctx.fillText(`Epic ${state.player.inventory.epic}`, 736, 106);
+      ctx.fillText(`Legendary ${state.player.inventory.legendary}`, 736, 128);
+      ctx.fillText(`Weapon ${state.player.weapon.name}`, 736, 152);
+      ctx.fillText(`Armor ${state.player.armorEquip.name}`, 736, 174);
+      ctx.restore();
+    }
+
+    function drawShopWindow() {
+      if (!state.showShop) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.94)";
+      ctx.fillRect(220, 140, 520, 270);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(220, 140, 520, 270);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 24px Segoe UI";
+      ctx.fillText("Shop", 240, 180);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("1) Buy HP +15 (100 Gold)", 240, 220);
+      ctx.fillText("2) Buy Speed +1 (100 Gold)", 240, 248);
+      ctx.fillText("3) Buy Damage +3 (100 Gold)", 240, 276);
+      ctx.fillText("4) Buy Armor +2 (120 Gold)", 240, 304);
+      ctx.fillText("Press B to close", 240, 340);
+      ctx.restore();
+    }
+
+    function drawPauseWindow() {
+      if (!state.paused) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+      ctx.fillRect(250, 170, 460, 260);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.strokeRect(250, 170, 460, 260);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 30px Segoe UI";
+      ctx.fillText("Paused", 390, 220);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("R = Resume", 300, 270);
+      ctx.fillText("S = Save", 300, 298);
+      ctx.fillText("T = Reset", 300, 326);
+      ctx.restore();
+    }
+
+    function drawDungeon() {
+      if (state.mode !== "dungeon" || !state.dungeon) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(24, 420, 240, 150);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(24, 420, 240, 150);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Dungeon Floor ${state.dungeon.floor}`, 36, 446);
+      ctx.fillText(`Rooms ${state.dungeon.rooms.length}`, 36, 470);
+      ctx.fillText(`Portal Ready`, 36, 494);
+      ctx.restore();
+    }
+
+    function drawWorld() {
+      drawBackground();
+      if (state.mode === "dungeon") drawDungeonGrid();
+      state.crystals.forEach((crystal) => {
+        ctx.save();
+        ctx.translate(crystal.x + crystal.size / 2, crystal.y + crystal.size / 2);
+        ctx.scale(1 + Math.sin(crystal.pulse) * 0.04, 1 + Math.sin(crystal.pulse) * 0.04);
+        ctx.fillStyle = crystal.rarity.color;
+        ctx.fillRect(-crystal.size / 2, -crystal.size / 2, crystal.size, crystal.size);
+        ctx.restore();
+      });
+      state.enemies.forEach((enemy) => {
+        ctx.save();
+        ctx.translate(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2);
+        ctx.globalAlpha = enemy.flash > 0 ? 0.65 : 1;
+        ctx.fillStyle = enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#ef4444";
+        ctx.fillRect(-enemy.size / 2, -enemy.size / 2, enemy.size, enemy.size);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
+        ctx.restore();
+      });
+      ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+      state.particles.forEach((p) => {
+        ctx.globalAlpha = Math.max(0, p.life / 34);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+      state.effects.forEach((effect) => {
+        ctx.fillStyle = effect.color;
+        ctx.fillRect(effect.x, effect.y, 6, 6);
+      });
+      state.floatingTexts.forEach((t) => {
+        ctx.fillStyle = t.color;
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(t.text, t.x, t.y);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawWorld();
+      drawHud();
+      drawInventoryPanel();
+      drawShopWindow();
+      drawPauseWindow();
+      drawDungeon();
+      if (state.mode === "dungeon") drawDungeonPlayer();
+    }
+
+    function gameOver() {
+      state.highScore = Math.max(state.highScore, state.player.score);
+      saveGame();
+      playTone(180, 0.2, "sawtooth", 0.08);
+      alert("Game Over! Press OK to restart.");
+      resetGame();
+    }
+
+    function buyUpgrade(id) {
+      const costs = { hp: 100, speed: 100, damage: 100, armor: 120 };
+      if (state.player.gold < costs[id]) return;
+      state.player.gold -= costs[id];
+      if (id === "hp") {
+        state.player.maxHp += 15;
+        state.player.hp = state.player.maxHp;
+        state.player.upgrades.hp += 1;
+      } else if (id === "speed") {
+        state.player.speed += 1;
+        state.player.upgrades.speed += 1;
+      } else if (id === "damage") {
+        state.player.attackDamage += 3;
+        state.player.weapon.damage = state.player.attackDamage;
+        state.player.upgrades.damage += 1;
+      } else if (id === "armor") {
+        state.player.armorEquip.defense += 2;
+        state.player.upgrades.armor += 1;
+      }
+      playTone(520, 0.06, "triangle", 0.06);
+      saveGame();
+    }
+
+    function toggleShop() {
+      state.showShop = !state.showShop;
+      if (!state.showShop) state.paused = false;
+    }
+
+    function toggleInventory() {
+      state.showInventory = !state.showInventory;
+    }
+
+    function generateDungeon() {
+      const size = 11;
+      const grid = Array.from({ length: size }, () => Array(size).fill(1));
+      const rooms = [];
+      const start = { x: 1, y: 1 };
+      rooms.push({ x: 1, y: 1, w: 2, h: 2 });
+      const targets = [
+        { x: 3, y: 3 },
+        { x: 7, y: 3 },
+        { x: 8, y: 7 },
+        { x: 3, y: 8 }
+      ];
+      targets.forEach((room) => {
+        rooms.push({ x: room.x, y: room.y, w: 2, h: 2 });
+      });
+      rooms.forEach((room) => {
+        for (let y = room.y; y < room.y + room.h; y++) {
+          for (let x = room.x; x < room.x + room.w; x++) {
+            grid[y][x] = 0;
+          }
+        }
+      });
+      for (let i = 1; i < rooms.length; i++) {
+        const prev = rooms[i - 1];
+        const next = rooms[i];
+        const cx1 = prev.x + Math.floor(prev.w / 2);
+        const cy1 = prev.y + Math.floor(prev.h / 2);
+        const cx2 = next.x + Math.floor(next.w / 2);
+        const cy2 = next.y + Math.floor(next.h / 2);
+        for (let x = Math.min(cx1, cx2); x <= Math.max(cx1, cx2); x++) grid[cy1][x] = 0;
+        for (let y = Math.min(cy1, cy2); y <= Math.max(cy1, cy2); y++) grid[y][cx2] = 0;
+      }
+      state.dungeon = { floor: 1 + state.player.level, rooms, grid, start, exit: rooms[rooms.length - 1] };
+      state.player.x = start.x * 50 + 20;
+      state.player.y = start.y * 50 + 20;
+      state.mode = "dungeon";
+      state.player.stats.dungeonFloors += 1;
+      saveGame();
+    }
+
+    function drawDungeonGrid() {
+      if (!state.dungeon) return;
+      for (let y = 0; y < state.dungeon.grid.length; y++) {
+        for (let x = 0; x < state.dungeon.grid[y].length; x++) {
+          const tile = state.dungeon.grid[y][x];
+          ctx.fillStyle = tile === 1 ? "#1f2937" : "#0f766e";
+          ctx.fillRect(x * 48 + 24, y * 48 + 24, 40, 40);
+        }
+      }
+      const exit = state.dungeon.exit;
+      ctx.fillStyle = "#facc15";
+      ctx.fillRect(exit.x * 48 + 24, exit.y * 48 + 24, 40, 40);
+    }
+
+    function drawDungeonPlayer() {
+      if (!state.dungeon) return;
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+    }
+
+    function updateDungeon(delta) {
+      if (!state.dungeon) return;
+      const tileX = Math.floor((state.player.x + state.player.size / 2) / 48) - 1;
+      const tileY = Math.floor((state.player.y + state.player.size / 2) / 48) - 1;
+      const exit = state.dungeon.exit;
+      if (tileX === exit.x && tileY === exit.y) {
+        state.player.level += 1;
+        state.player.gold += 60;
+        state.player.score += 120;
+        addFloatingText(120, 440, "Floor Cleared", "#fbbf24", 110);
+        generateDungeon();
+      }
+    }
+
+    function playTone(frequency, duration, type = "sine", volume = 0.04) {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    }
+
+    function startMusic() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (musicGain) return;
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.01;
+      musicGain.connect(audioCtx.destination);
+      musicOsc = audioCtx.createOscillator();
+      musicOsc.type = "sine";
+      musicOsc.frequency.value = 220;
+      musicOsc.connect(musicGain);
+      musicOsc.start();
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      saveGame();
+    }
+
+    function handleCanvasClick(event) {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      if (state.paused) {
+        if (x > 300 && x < 420 && y > 260 && y < 300) {
+          state.paused = false;
+        } else if (x > 300 && x < 420 && y > 300 && y < 340) {
+          saveGame();
+        } else if (x > 300 && x < 420 && y > 340 && y < 380) {
+          resetGame();
+        }
+        return;
+      }
+      if (state.showShop) {
+        if (x > 250 && x < 480 && y > 220 && y < 250) buyUpgrade("hp");
+        if (x > 250 && x < 480 && y > 248 && y < 276) buyUpgrade("speed");
+        if (x > 250 && x < 480 && y > 276 && y < 304) buyUpgrade("damage");
+        if (x > 250 && x < 480 && y > 304 && y < 332) buyUpgrade("armor");
+      }
+    }
+
+    function animate(timestamp) {
+      const delta = Math.min(32, timestamp - lastTime || 16);
+      lastTime = timestamp;
+      update(delta);
+      draw();
+      requestAnimationFrame(animate);
+    }
+
+    document.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      keyState[key] = true;
+      if (key === " " || key === "space") { event.preventDefault(); }
+      if (key === "escape") {
+        event.preventDefault();
+        togglePause();
+      }
+      if (key === "b") toggleShop();
+      if (key === "i") toggleInventory();
+      if (key === "r" && state.paused) state.paused = false;
+      if (key === "s" && state.paused) saveGame();
+      if (key === "t" && state.paused) resetGame();
+      if (key === "d") generateDungeon();
+      if (key === "1") buyUpgrade("hp");
+      if (key === "2") buyUpgrade("speed");
+      if (key === "3") buyUpgrade("damage");
+      if (key === "4") buyUpgrade("armor");
+    });
+
+    document.addEventListener("keyup", (event) => {
+      keyState[event.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener("click", handleCanvasClick);
+    window.addEventListener("beforeunload", saveGame);
+    document.querySelectorAll(".controls button").forEach((button) => {
+      const action = button.getAttribute("data-action");
+      button.addEventListener("pointerdown", () => {
+        if (action === "up") pointerState.up = true;
+        if (action === "down") pointerState.down = true;
+        if (action === "left") pointerState.left = true;
+        if (action === "right") pointerState.right = true;
+        if (action === "attack") pointerState.attack = true;
+        if (action === "shop") toggleShop();
+        if (action === "inventory") toggleInventory();
+      });
+      button.addEventListener("pointerup", () => {
+        if (action === "up") pointerState.up = false;
+        if (action === "down") pointerState.down = false;
+        if (action === "left") pointerState.left = false;
+        if (action === "right") pointerState.right = false;
+        if (action === "attack") pointerState.attack = false;
+      });
+      button.addEventListener("pointerleave", () => {
+        if (action === "up") pointerState.up = false;
+        if (action === "down") pointerState.down = false;
+        if (action === "left") pointerState.left = false;
+        if (action === "right") pointerState.right = false;
+        if (action === "attack") pointerState.attack = false;
+      });
+    });
+
+    initWorld();
+    startMusic();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
